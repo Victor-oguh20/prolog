@@ -137,12 +137,12 @@ reverter_lista([Cabeca|Cauda], Revertida) :-
 concatenar([], []).
 concatenar([Lista], Lista).
 concatenar([Lista1, Lista2|Resto], Resultado) :-
-    concatenar_duas(Lista1, Lista2, Temp),
+    concatenar_lista(Lista1, Lista2, Temp),
     concatenar([Temp|Resto], Resultado).
 
-concatenar_duas([], Lista, Lista).
-concatenar_duas([Cabeca|Cauda], Lista2, [Cabeca|Resultado]) :-
-    concatenar_duas(Cauda, Lista2, Resultado).
+concatenar_lista([], Lista, Lista).
+concatenar_lista([Cabeca|Cauda], Lista2, [Cabeca|Resultado]) :-
+    concatenar_lista(Cauda, Lista2, Resultado).
 
 % contar elementos na lista, onde ignora cada item da lista por vez (comecando pela cabeca), diminuindo o tam. da lista ate fica vazia e soma cada vez que isso ocorre ate ela ficar vazia.
 contar_elementos([], 0).
@@ -150,10 +150,167 @@ contar_elementos([_|Cauda], N) :-
     contar_elementos(Cauda, N1),
     N is N1 + 1.
 
+% serve para coletar as doencas da base de conhecimento de forma unica, sem repetir. Onde busca pelos fatos apenas as doencas e vai agregando cada uma delas na lista sem repetir  
+% usa o cut, pois apos encontrar todas as doencas disponiveis nao procura nenhuma outra mais 
+coletar_doencas_sem_repetir(Doencas) :-
+    coletar_doencas_aux([], DoencasInvertidas),
+    reverter_lista(DoencasInvertidas, Doencas).
 
-% declaramos predicados que podem ser modificados em tempo de execução (adicionar/remover fatos). Pois serao usados no menu interativo
+coletar_doencas_aux(ListaAtual, Doencas) :-
+    sintoma(Doenca, _, _, _, _, _, _),
+    nao_esta_na_lista(Doenca, ListaAtual),
+    colocar_na_lista(Doenca, ListaAtual, NovaLista),
+    coletar_doencas_aux(NovaLista, Doencas), !.
+coletar_doencas_aux(Lista, Lista).
+
+% adiciona sinonimos aos sintomas (o programa busca pelos sinonimos que o paciente disser que tem)
+sinonimo_sintomas([], []).
+sinonimo_sintomas([Sintoma|Resto], SintomasSinonimo) :-
+    sinonimo_sintomas(Resto, RestoExpandido),
+    (subconjunto_sintomas(Sintoma, Equivalente) ->
+        (nao_esta_na_lista(Equivalente, RestoExpandido) ->
+            SintomasSinonimo = [Sintoma, Equivalente|RestoExpandido];
+            SintomasSinonimo = [Sintoma|RestoExpandido]
+        );
+        SintomasSinonimo = [Sintoma|RestoExpandido]
+    ).
+
+% busca o valor numerico de cada classificacao, para maior flexibilidade e mudar em um so lugar, caso necessario
+obter_peso_classificacao(critico, Peso) :- peso_critico(Peso).
+obter_peso_classificacao(comum, Peso) :- peso_comum(Peso).
+obter_peso_classificacao(raro, Peso) :- peso_raro(Peso).
+
+obter_multiplicador_intensidade(leve, Multi) :- multiplicador_leve(Multi).
+obter_multiplicador_intensidade(moderada, Multi) :- multiplicador_moderada(Multi).
+obter_multiplicador_intensidade(alta, Multi) :- multiplicador_alta(Multi).
+obter_multiplicador_intensidade(severa, Multi) :- multiplicador_severa(Multi).
+
+obter_multiplicador_frequencia(continuo, Multi) :- multiplicador_continuo(Multi).
+obter_multiplicador_frequencia(intermitente, Multi) :- multiplicador_intermitente(Multi).
+obter_multiplicador_frequencia(raro, Multi) :- multiplicador_raro_freq(Multi).
+
+% calculo score de cada doenca de forma individual baseado nos sintomas do paciente 
+% onde 1: expande o sintoma com seus sinonimos, 2: chama um auxiliar para calcular o score da doenca
+calcular_score_doenca(Doenca, Sintomas, ScoreTotal, Detalhes) :-
+    sinonimo_sintomas(Sintomas, SintomasSinonimo),
+    calcular_score_aux(Doenca, SintomasSinonimo, 0, ScoreTotal, [], DetalhesInvertidos),
+    reverter_lista(DetalhesInvertidos, Detalhes).
+
+calcular_score_aux(_, [], Acum, Acum, DetalhesAcum, DetalhesAcum).
+calcular_score_aux(Doenca, [Sintoma|Resto], Acum, ScoreTotal, DetalhesAcum, DetalhesFinal) :-
+    (sintoma(Doenca, Sintoma, intensidade(Int), prob(P), _, frequencia(Freq), Class) ->
+        obter_peso_classificacao(Class, PClass),
+        obter_multiplicador_intensidade(Int, PInt),
+        obter_multiplicador_frequencia(Freq, PFreq),
+        Temp1 is P * PClass,
+        Temp2 is Temp1 * PInt,
+        ScoreIndividual is Temp2 * PFreq,
+        NovoAcum is Acum + ScoreIndividual,
+        Detalhe = detalhe(Sintoma, P, Class, Int, Freq, ScoreIndividual),
+        colocar_na_lista(Detalhe, DetalhesAcum, NovosDetalhes) ;
+        NovoAcum = Acum,
+        NovosDetalhes = DetalhesAcum
+    ),
+    calcular_score_aux(Doenca, Resto, NovoAcum, ScoreTotal, NovosDetalhes, DetalhesFinal).
+
+% calculo do score de todas as doencas, pois quando o paciente informa seus sintomas, ha varias doencas que apresentam esses sintomas como padrao
+calcular_todos_scores(_, [], []).
+calcular_todos_scores(Sintomas, [Doenca|Resto], Resultados) :-
+    calcular_score_doenca(Doenca, Sintomas, Score, Detalhes),
+    (Score > 0 ->
+        Resultados = [(Doenca, Score, Detalhes)|ResultadosResto] ;
+        Resultados = ResultadosResto
+    ),
+    calcular_todos_scores(Sintomas, Resto, ResultadosResto).
+
+% ordena as doencas do maior para menor score, atraves de comparacao, ate as mudancas nao acontecerem mais e o primeiro elemento da lista for o de maior score entre todos
+ordenar_resultados(Lista, Ordenada) :-
+    troca(Lista, Lista1),
+    (listas_iguais(Lista, Lista1) -> 
+        Ordenada = Lista
+    ; 
+        ordenar_resultados(Lista1, Ordenada)
+    ).
+
+troca([], []).
+troca([X], [X]).
+troca([(D1,S1,Det1),(D2,S2,Det2)|Cauda], [(D2,S2,Det2)|Resultado]) :-
+    S2 > S1, !,
+    troca([(D1,S1,Det1)|Cauda], Resultado).
+troca([X|Cauda], [X|Resultado]) :-
+    troca(Cauda, Resultado).
+
+listas_iguais([], []).
+listas_iguais([X|C1], [X|C2]) :-
+    listas_iguais(C1, C2).
+
+% diagnostico principal, e onde junta e acontece tudo apos dizer os sintomas 
+% tem no resultado final as doencas e os scores delas, mas retira os detalhes
+diagnosticar_doenca(Sintomas, Resultado) :-
+    coletar_doencas_sem_repetir(TodasDoencas),
+    calcular_todos_scores(Sintomas, TodasDoencas, ResultadosBrutos),
+    ordenar_resultados(ResultadosBrutos, ResultadosOrdenados),
+    formatar_resultado(ResultadosOrdenados, Resultado).
+
+formatar_resultado([], []).
+formatar_resultado([(Doenca, Score, _)|Resto], [(Doenca, Score)|RestoFormatado]) :-
+    formatar_resultado(Resto, RestoFormatado).
+
+% todos os sintomas de uma unica doenca em especifico (junta todas os sintomas que tal doenca possui)
+listar_sintomas(Doenca, Listar) :-
+    listar_sintomas_aux(Doenca, [], ListaInvertida),
+    reverter_lista(ListaInvertida, Listar).
+
+listar_sintomas_aux(Doenca, Acum, Listar) :-
+    sintoma(Doenca, Sintoma, _, _, _, _, _),
+    nao_esta_na_lista(Sintoma, Acum),
+    colocar_na_lista(Sintoma, Acum, NovoAcum),
+    listar_sintomas_aux(Doenca, NovoAcum, Listar), !.
+listar_sintomas_aux(_, Listar, Listar). 
+
+% todas doencas que possuem um unico sintoma em especifico(processo inverso do anterior, onde junta todas as doencas que possuem tal sintoma)
+quais_doencas_possui(Sintoma, Doencas) :-
+    sinonimo_sintomas([Sintoma], SintomasSinonimo),
+    quais_doencas_aux(SintomasSinonimo, [], DoencasInvertidas),
+    reverter_lista(DoencasInvertidas, Doencas).
+
+quais_doencas_aux([], Acum, Acum).
+quais_doencas_aux([Sintoma|Resto], Acum, Doencas) :-
+    coletar_doencas_com_sintoma(Sintoma, Acum, NovoAcum),
+    quais_doencas_aux(Resto, NovoAcum, Doencas).
+
+coletar_doencas_com_sintoma(Sintoma, Acum, Doencas) :-
+    sintoma(Doenca, Sintoma, _, _, _, _, _),
+    nao_esta_na_lista(Doenca, Acum),
+    colocar_na_lista(Doenca, Acum, NovoAcum),
+    coletar_doencas_com_sintoma(Sintoma, NovoAcum, Doencas), !.
+coletar_doencas_com_sintoma(_, Acum, Acum).
+
+% explicacao de como chegou no diagnostico, mostrando o score de cada sintoma
+explicar(Doenca, Sintomas, Explicacao) :-
+    sinonimo_sintomas(Sintomas, SintomasSinonimo),
+    explicar_aux(Doenca, SintomasSinonimo, [], ExplicacaoInvertida),
+    reverter_lista(ExplicacaoInvertida, Explicacao).
+
+explicar_aux(_, [], Acum, Acum).
+explicar_aux(Doenca, [Sintoma|Resto], Acum, Explicacao) :-
+    (sintoma(Doenca, Sintoma, intensidade(Int), prob(P), _, frequencia(Freq), Class) ->
+        obter_peso_classificacao(Class, PClass),
+        obter_multiplicador_intensidade(Int, PInt),
+        obter_multiplicador_frequencia(Freq, PFreq),
+        Temp1 is P * PClass,
+        Temp2 is Temp1 * PInt,
+        Score is Temp2 * PFreq,
+        Item = (Sintoma, prob=P, class=Class, int=Int, freq=Freq, score=Score),
+        colocar_na_lista(Item, Acum, NovoAcum) ;
+        NovoAcum = Acum
+    ),
+    explicar_aux(Doenca, Resto, NovoAcum, Explicacao).
+
+% declaramos predicados que podem ser modificados durante a execução (adicionar/remover fatos). Pois serao usados no menu interativo
 % dynamic serve para isso, pois fatos são fixos no código e dynamic permite usar o assert (adicionar) e o retract (remover) durante execucao
 :- dynamic paciente/4. %(Nome, CPF, Telefone, Sintomas)
 :- dynamic diag_paciente/3. % (CPF, Doenca, Score)
 :- dynamic sessao_dia/1. % (NumPacientes)  
+
 
