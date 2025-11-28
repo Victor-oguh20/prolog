@@ -180,14 +180,14 @@ obter_peso_classificacao(critico, Peso) :- peso_critico(Peso).
 obter_peso_classificacao(comum, Peso) :- peso_comum(Peso).
 obter_peso_classificacao(raro, Peso) :- peso_raro(Peso).
 
-obter_multiplicador_intensidade(leve, Multi) :- multiplicador_leve(Multi).
-obter_multiplicador_intensidade(moderada, Multi) :- multiplicador_moderada(Multi).
-obter_multiplicador_intensidade(alta, Multi) :- multiplicador_alta(Multi).
-obter_multiplicador_intensidade(severa, Multi) :- multiplicador_severa(Multi).
+obter_multiplicador_intensidade(leve, Multi) :- m_leve(Multi).
+obter_multiplicador_intensidade(moderada, Multi) :- m_moderada(Multi).
+obter_multiplicador_intensidade(alta, Multi) :- m_alta(Multi).
+obter_multiplicador_intensidade(severa, Multi) :- m_severa(Multi).
 
-obter_multiplicador_frequencia(continuo, Multi) :- multiplicador_continuo(Multi).
-obter_multiplicador_frequencia(intermitente, Multi) :- multiplicador_intermitente(Multi).
-obter_multiplicador_frequencia(raro, Multi) :- multiplicador_raro_freq(Multi).
+obter_multiplicador_frequencia(continuo, Multi) :- m_continuo(Multi).
+obter_multiplicador_frequencia(intermitente, Multi) :- m_intermitente(Multi).
+obter_multiplicador_frequencia(raro, Multi) :- m_rarof(Multi).
 
 % calculo score de cada doenca de forma individual baseado nos sintomas do paciente 
 % onde 1: expande o sintoma com seus sinonimos, 2: chama um auxiliar para calcular o score da doenca
@@ -307,10 +307,124 @@ explicar_aux(Doenca, [Sintoma|Resto], Acum, Explicacao) :-
     ),
     explicar_aux(Doenca, Resto, NovoAcum, Explicacao).
 
+% sistema interativo de pacientes
+
+% enquanto o paciente digita sim (acrescenta o sintoma perguntado a lista e busca ao final descobrir a doenca que mais apresenta tais sintomas)
+% se o paciente digita nao (a lista fica vazia [] para tal sintoma perguntado e nao acrescenta a concatenacao)
+consulta_interativa :-
+    write('perguntas sobre seu sintomas: '), nl, nl,
+    
+    perguntar_sintoma('voce tem tosse?', tosse, Sintomas1),
+    perguntar_sintoma('voce sente febre?', febre, Sintomas2),
+    perguntar_sintoma('voce tem falta de ar ou dificuldade para respirar?', falta_de_ar, Sintomas3),
+    perguntar_sintoma('voce sente dor de garganta?', dor_garganta, Sintomas4),
+    perguntar_sintoma('voce perdeu o olfato ou paladar?', perda_olfato, Sintomas5),
+    perguntar_sintoma('voce tem congestão nasal?', congestao_nasal, Sintomas6),
+    perguntar_sintoma('voce sente fadiga ou cansaço extremo?', fadiga, Sintomas7),
+    
+    concatenar([Sintomas1, Sintomas2, Sintomas3, Sintomas4, Sintomas5, Sintomas6, Sintomas7], TodosSintomas),
+    
+    nl, write('sintomas coletados: '), write(TodosSintomas), nl, nl,
+    
+    diagnosticar_doenca(TodosSintomas, Resultado),
+    
+    write('resultado do diagnostico: '), nl,
+    mostrar_resultado_formatado(Resultado).
+
+perguntar_sintoma(Pergunta, Sintoma, Lista) :-
+    write(Pergunta), write(' (sim/nao): '),
+    read(Resposta),
+    (Resposta = sim -> Lista = [Sintoma] ; Lista = []).
+
+mostrar_resultado_formatado([]) :-
+    write('nenhuma doenca foi identificada com os sintomas fornecidos.'), nl.
+mostrar_resultado_formatado([(Doenca, Score)|Resto]) :-
+    write('doenca: '), write(Doenca), 
+    write(' / score da doenca e: '), write(Score), nl,
+    mostrar_resultado_formatado(Resto).
+
+
 % declaramos predicados que podem ser modificados durante a execução (adicionar/remover fatos). Pois serao usados no menu interativo
 % dynamic serve para isso, pois fatos são fixos no código e dynamic permite usar o assert (adicionar) e o retract (remover) durante execucao
 :- dynamic paciente/4. %(Nome, CPF, Telefone, Sintomas)
 :- dynamic diag_paciente/3. % (CPF, Doenca, Score)
 :- dynamic sessao_dia/1. % (NumPacientes)  
 
+% sistema de gestao de pacientes diarios
+iniciar_sessao :-
+    write(' gestao de pacientes diarios '), nl,
+    write('quantos pacientes serao atendidos hoje? '),
+    read(N),
+    retractall(sessao_dia(_)),
+    retractall(paciente(_,_,_,_)),
+    retractall(diag_paciente(_,_,_)),
+    assert(sessao_dia(N)),
+    nl, write('sessao iniciada para '), write(N), write(' pacientes.'), nl, nl,
+    atender_pacientes(N, 1).
 
+atender_pacientes(Total, Atual) :-
+    Atual > Total, !,
+    nl, write('todos os pacientes foram atendidos!'), nl, nl,
+    gerar_relatorio.
+
+atender_pacientes(Total, Atual) :-
+    nl, write('PACIENTE '), write(Atual),  nl,
+    cadastrar_paciente,
+    Proximo is Atual + 1,
+    atender_pacientes(Total, Proximo).
+
+cadastrar_paciente :-
+    write('nome do paciente: '),
+    read(Nome),
+    write('CPF: '),
+    read(CPF),
+    write('telefone: '),
+    read(Telefone),
+    write('digite os sintomas assim -> [sintoma1, sintoma2, ...]: '),
+    read(Sintomas),
+    assert(paciente(Nome, CPF, Telefone, Sintomas)),
+    processar_diagnostico(CPF, Sintomas).
+
+processar_diagnostico(CPF, Sintomas) :-
+    diagnosticar_doenca(Sintomas, Resultados),
+    salvar_diagnosticos(CPF, Resultados),
+    nl, write(' diagnostico '), nl,
+    mostrar_resultado_formatado(Resultados), nl.
+
+salvar_diagnosticos(_, []).
+salvar_diagnosticos(CPF, [(Doenca, Score)|Resto]) :-
+    assert(diag_paciente(CPF, Doenca, Score)),
+    salvar_diagnosticos(CPF, Resto).
+
+gerar_relatorio :-
+    write('relatorio diario de pacientes'), nl,
+    sessao_dia(Total),
+    write('total de pacientes atendidos: '), write(Total), nl, nl,
+    listar_todos_pacientes.
+
+listar_todos_pacientes :-
+    paciente(Nome, CPF, Telefone, Sintomas),
+    write('paciente: '), write(Nome), nl,
+    write('CPF: '), write(CPF), nl,
+    write('telefone: '), write(Telefone), nl,
+    write('sintomas relatados: '), write(Sintomas), nl,
+    write('diagnosticos:'), nl,
+    listar_diagnosticos_paciente(CPF),
+    nl,
+    fail. % fail força o programa a buscar todos os pacientes / sem fail, pararia no primeiro
+listar_todos_pacientes.
+
+listar_diagnosticos_paciente(CPF) :-
+    diag_paciente(CPF, Doenca, Score),
+    write(' '), write(Doenca), 
+    write(' (Score: '), write(Score), write(')'), nl,
+    fail.
+listar_diagnosticos_paciente(_).
+
+% Limpa dados anteriores: retractall(sessao_dia(_)) Remove sessoes antigas 
+% retractall(paciente(_,_,_,_)) Remove pacientes antigos
+% retractall(diagnostico_pac(_,_,_)) Remove diagnósticos antigos
+
+% ja o assert(sessao_dia(3)) registra os pacientes diarios (3 pacientes hoje)
+% o atender_pacientes(3, 1)  chama o atendimento, como total: 3, Atual: 1 / o programa vai rodando ate o numero de pacientes for maior que o total
+ 
