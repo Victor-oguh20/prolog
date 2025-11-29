@@ -420,6 +420,7 @@ listar_diagnosticos_paciente(CPF) :-
     write(' (Score: '), write(Score), write(')'), nl,
     fail.
 listar_diagnosticos_paciente(_).
+%retractall e assert sao funcoes de controle do sistema, como um write ou read. dessa forma, sao primitivas de prolog apenas para controle
 
 % Limpa dados anteriores: retractall(sessao_dia(_)) Remove sessoes antigas 
 % retractall(paciente(_,_,_,_)) Remove pacientes antigos
