@@ -428,4 +428,4 @@ listar_diagnosticos_paciente(_).
 
 % ja o assert(sessao_dia(3)) registra os pacientes diarios (3 pacientes hoje)
 % o atender_pacientes(3, 1)  chama o atendimento, como total: 3, Atual: 1 / o programa vai rodando ate o numero de pacientes for maior que o total
- 
+
